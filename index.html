@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogicLens: AI Code Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- highlight.js for syntax highlighting - LIGHT THEME -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- dagre.js for graph layout -->
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+    <!-- marked.js for markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --light-bg: #ffffff;
+            --panel-bg: rgba(249, 250, 251, 0.7); /* Light Glassmorphism */
+            --border-color: rgba(209, 213, 219, 0.5);
+            --text-question: #111827; /* Black for questions */
+            --text-solution: #047857; /* Dark Green for solutions */
+            --text-secondary: #6b7280;
+            --accent: #10b981; /* Green accent */
+            --accent-hover: #059669;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--light-bg);
+            background-image: linear-gradient(135deg, #ffffff 0%, #f9fafb 100%);
+            color: var(--text-question);
+            overflow: hidden;
+        }
+        .code-font { font-family: 'Fira Code', monospace; }
+        .panel { 
+            background-color: var(--panel-bg); 
+            border: 1px solid var(--border-color); 
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            transition: opacity 0.5s ease, transform 0.5s ease;
+            position: relative;
+        }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+        .panel-header h2 { margin-bottom: 0; }
+        .copy-btn { background: none; border: 1px solid var(--border-color); color: var(--text-secondary); padding: 4px 8px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        .copy-btn:hover { background-color: var(--border-color); color: var(--text-question); }
+        .animated-entry { opacity: 0; transform: translateY(20px); }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #d1d5db; }
+        
+        #flowchart-container { cursor: grab; }
+        .flowchart-node rect, .flowchart-node path { stroke-width: 2px; stroke: var(--accent); fill: #f0fdf4; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05)); }
+        .flowchart-node text { user-select: none; font-size: 14px; font-weight: 500; fill: var(--text-solution); }
+        .flowchart-link { stroke-width: 2px; stroke: var(--accent); marker-end: url(#arrowhead); fill: none; }
+        #arrowhead path { fill: var(--accent); }
+        
+        .btn-primary { background-color: var(--accent); color: white; transition: all 0.3s; font-weight: 600; }
+        .btn-primary:hover { background-color: var(--accent-hover); transform: translateY(-2px); box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2); }
+        .btn-primary:disabled { background-color: #9ca3af; color: #e5e7eb; cursor: not-allowed; transform: none; box-shadow: none; }
+        
+        #code-editor-container { position: relative; height: 100%; }
+        #code-editor { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: transparent; border-radius: 8px; padding: 1rem; resize: none; outline: none; color: transparent; caret-color: var(--text-question); z-index: 1; }
+        #highlighting { position: absolute; top:0; left: 0; right: 0; bottom: 0; margin: 0; padding: 1rem; pointer-events: none; border-radius: 8px; overflow: auto; }
+        .hljs { background: #fafafa !important; }
+
+        .welcome-placeholder { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; text-align: center; color: var(--text-secondary); }
+        .welcome-placeholder svg { transition: transform 1s ease-in-out; }
+        .welcome-placeholder:hover svg { transform: rotate(15deg) scale(1.1); }
+
+        /* Solution Panels Text Color */
+        #explanation-panel, #optimization-panel {
+            color: var(--text-solution);
+        }
+        .prose {
+             --tw-prose-body: var(--text-solution);
+             --tw-prose-headings: var(--accent);
+             --tw-prose-links: var(--text-solution);
+             --tw-prose-bold: var(--text-solution);
+             --tw-prose-code: var(--accent);
+             --tw-prose-quotes: var(--text-solution);
+        }
+
+        /* Welcome Animation */
+        #welcome-overlay {
+            transition: opacity 0.8s ease-in-out;
+        }
+        .welcome-word {
+            display: inline-block;
+            opacity: 0;
+            transform: translateY(30px);
+            animation: fadeIn-up 0.6s forwards;
+        }
+        .welcome-word:nth-child(1) { animation-delay: 0.2s; }
+        .welcome-word:nth-child(2) { animation-delay: 0.4s; }
+        .welcome-word:nth-child(3) { animation-delay: 0.6s; }
+        .welcome-word:nth-child(4) { animation-delay: 0.8s; }
+        .welcome-word:nth-child(5) { animation-delay: 1.0s; }
+
+
+        @keyframes fadeIn-up {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body class="w-screen h-screen p-4 flex flex-col gap-4">
+
+    <div id="welcome-overlay" class="fixed inset-0 bg-white flex items-center justify-center z-50">
+        <h1 class="text-4xl md:text-5xl font-bold text-center text-gray-800 leading-tight">
+            <span class="welcome-word">LogicLens:</span>
+            <span class="welcome-word">Visualizing</span>
+            <span class="welcome-word">Code,</span>
+            <span class="welcome-word">Simplifying</span>
+            <span class="welcome-word">Complexity.</span>
+        </h1>
+    </div>
+
+    <header class="flex-shrink-0 flex justify-between items-center animated-entry">
+        <div class="flex items-center gap-3">
+            <svg class="w-8 h-8 text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
+            <h1 class="text-2xl font-bold">LogicLens</h1>
+        </div>
+        <button id="analyze-btn" class="btn-primary px-6 py-2 rounded-lg flex items-center gap-2">
+            <span id="btn-text">Analyze Code</span>
+            <div id="btn-loader" class="hidden w-5 h-5 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
+        </button>
+    </header>
+
+    <main class="flex-grow grid grid-cols-1 lg:grid-cols-2 gap-4 h-full min-h-0">
+        <!-- Left Column -->
+        <div class="flex flex-col gap-4 h-full min-h-0">
+            <div class="panel p-4 flex-shrink-0 animated-entry">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-lg font-semibold text-accent">Code Input</h2>
+                    <select id="language-select" class="bg-transparent border border-border-color rounded-md px-2 py-1 text-sm text-text-question focus:ring-accent">
+                        <option value="javascript">JavaScript</option><option value="python">Python</option><option value="java">Java</option><option value="c">C</option><option value="cpp">C++</option>
+                    </select>
+                </div>
+                <p class="text-sm text-text-secondary">Select a language, paste your code, and press 'Analyze' to begin.</p>
+            </div>
+            <div class="panel flex-grow p-4 min-h-0 animated-entry">
+                <div id="code-editor-container">
+                    <textarea id="code-editor" class="code-font w-full h-full" placeholder="function main() { ... }" spellcheck="false"></textarea>
+                    <pre id="highlighting" aria-hidden="true"><code class="w-full h-full" id="highlighting-content"></code></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column -->
+        <div class="grid grid-rows-2 gap-4 h-full min-h-0 animated-entry">
+            <div class="grid grid-rows-2 gap-4 h-full">
+                <div id="explanation-panel" class="panel p-4 overflow-y-auto">
+                    <div class="panel-header"><h2 class="text-lg font-semibold text-accent">Explanation</h2><button id="copy-explanation-btn" class="copy-btn">Copy</button></div>
+                    <div id="explanation-content" class="prose max-w-none"></div>
+                </div>
+                <div id="optimization-panel" class="panel p-4 overflow-y-auto">
+                    <div class="panel-header"><h2 class="text-lg font-semibold text-accent">Optimization Insights</h2><button id="copy-optimizations-btn" class="copy-btn">Copy</button></div>
+                    <div id="optimization-content" class="text-text-solution"></div>
+                </div>
+            </div>
+            <div id="flowchart-panel" class="panel p-4 overflow-hidden">
+                <h2 class="text-lg font-semibold text-accent">Flowchart</h2>
+                <div id="flowchart-container" class="w-full h-full"><svg id="flowchart-svg" class="w-full h-full"><defs><marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs><g id="flowchart-group"></g></svg></div>
+            </div>
+        </div>
+    </main>
+    
+    <!-- API Key Modal -->
+    <div id="api-key-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 transition-opacity duration-300">
+        <div class="panel p-6 rounded-lg shadow-xl w-full max-w-md bg-white">
+            <h2 class="text-xl font-bold text-accent mb-4">API Key Required</h2>
+            <p class="text-text-secondary mb-4">Please enter your Google Gemini API key. This is stored in your browser and is required to analyze code.</p>
+            <input type="password" id="modal-api-key-input" class="bg-gray-50 border border-gray-300 text-gray-900 rounded-md px-3 py-2 text-sm w-full focus:ring-1 focus:ring-accent focus:outline-none" placeholder="Enter your Gemini API Key">
+            <div class="flex justify-end items-center gap-4 mt-6">
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-sm text-text-secondary hover:text-accent">Get a Free API Key</a>
+                <button id="modal-cancel-btn" class="bg-transparent border border-gray-300 text-gray-700 rounded-lg px-4 py-2 hover:bg-gray-100">Cancel</button>
+                <button id="modal-save-btn" class="btn-primary px-4 py-2 rounded-lg">Save & Analyze</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        let apiKey = ""; // Will be populated from localStorage
+
+        // --- DOM Elements ---
+        const welcomeOverlay = document.getElementById('welcome-overlay');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const codeEditor = document.getElementById('code-editor');
+        const highlightingContent = document.getElementById('highlighting-content');
+        const languageSelect = document.getElementById('language-select');
+        const btnText = document.getElementById('btn-text');
+        const btnLoader = document.getElementById('btn-loader');
+        const explanationContent = document.getElementById('explanation-content');
+        const optimizationContent = document.getElementById('optimization-content');
+        const flowchartContainer = document.getElementById('flowchart-container');
+        const flowchartSvg = document.getElementById('flowchart-svg');
+        const flowchartGroup = document.getElementById('flowchart-group');
+        const animatedElements = document.querySelectorAll('.animated-entry');
+        const copyExplanationBtn = document.getElementById('copy-explanation-btn');
+        const copyOptimizationsBtn = document.getElementById('copy-optimizations-btn');
+        const apiKeyModal = document.getElementById('api-key-modal');
+        const modalApiKeyInput = document.getElementById('modal-api-key-input');
+        const modalSaveBtn = document.getElementById('modal-save-btn');
+        const modalCancelBtn = document.getElementById('modal-cancel-btn');
+
+        // --- Initial State & Animations ---
+        const sampleCode = {
+            javascript: `function factorial(n) {\n  if (n < 0) return "Invalid input";\n  if (n <= 1) return 1;\n  let result = 1;\n  for (let i = 2; i <= n; i++) {\n    result *= i;\n  }\n  return result;\n}`,
+            python: `def fibonacci(n):\n    if n <= 0:\n        return []\n    elif n == 1:\n        return [0]\n    a, b = 0, 1\n    result = [a, b]\n    while len(result) < n:\n        a, b = b, a + b\n        result.append(b)\n    return result`,
+            java: `public class QuickSort {\n    public void sort(int[] arr, int begin, int end) {\n        if (begin < end) {\n            int partitionIndex = partition(arr, begin, end);\n            sort(arr, begin, partitionIndex-1);\n            sort(arr, partitionIndex+1, end);\n        }\n    }\n    private int partition(int[] arr, int begin, int end) { /* ... */ }\n}`,
+            c: `#include <stdio.h>\n\nint main() {\n    int n, i, flag = 0;\n    printf("Enter a positive integer: ");\n    scanf("%d", &n);\n\n    for (i = 2; i <= n / 2; ++i) {\n        if (n % i == 0) {\n            flag = 1;\n            break;\n        }\n    }\n\n    if (n == 1) {\n        printf("1 is not prime.");\n    } else {\n        if (flag == 0)\n            printf("%d is a prime number.", n);\n        else\n            printf("%d is not a prime number.", n);\n    }\n    return 0;\n}`,
+            cpp: `#include <iostream>\n#include <vector>\n#include <numeric>\n\nint main() {\n    std::vector<int> nums = {1, 2, 3, 4, 5};\n    int sum = std::accumulate(nums.begin(), nums.end(), 0);\n    std::cout << "Sum: " << sum << std::endl;\n    return 0;\n}`
+        };
+        
+        // --- API Key Management ---
+        function saveAndSetApiKey() {
+            apiKey = modalApiKeyInput.value;
+            if (apiKey && apiKey.trim() !== "") {
+                localStorage.setItem('codeflow_api_key', apiKey);
+                apiKeyModal.classList.add('hidden');
+                handleAnalysis(); // Automatically proceed to analyze after saving
+            } else {
+                alert("Please enter a valid API key.");
+            }
+        }
+
+        function loadApiKey() {
+            const savedKey = localStorage.getItem('codeflow_api_key');
+            if (savedKey) {
+                apiKey = savedKey;
+            }
+        }
+        
+        // --- Event Listeners ---
+        codeEditor.addEventListener('input', updateHighlighting);
+        languageSelect.addEventListener('change', () => {
+             codeEditor.value = sampleCode[languageSelect.value] || '';
+             updateHighlighting();
+        });
+        analyzeBtn.addEventListener('click', () => {
+             if (!apiKey) {
+                apiKeyModal.classList.remove('hidden');
+                modalApiKeyInput.focus();
+                return;
+            }
+            handleAnalysis();
+        });
+        modalSaveBtn.addEventListener('click', saveAndSetApiKey);
+        modalCancelBtn.addEventListener('click', () => apiKeyModal.classList.add('hidden'));
+        copyExplanationBtn.addEventListener('click', () => copyToClipboard(explanationContent.innerText, copyExplanationBtn));
+        copyOptimizationsBtn.addEventListener('click', () => copyToClipboard(optimizationContent.innerText, copyOptimizationsBtn));
+
+        // --- Core Logic ---
+        async function handleAnalysis() {
+            const code = codeEditor.value.trim();
+            const language = languageSelect.options[languageSelect.selectedIndex].text;
+            if (!code) { return; }
+
+            setLoading(true);
+            explanationContent.innerHTML = '<p>AI is analyzing the code...</p>';
+            optimizationContent.innerHTML = '<p>Generating insights...</p>';
+            flowchartGroup.innerHTML = '<text x="50%" y="50%" fill="var(--text-secondary)" text-anchor="middle">Generating Flowchart...</text>';
+
+            try {
+                const prompt = `
+                    Analyze the following ${language} code snippet. Provide three things in your response:
+                    1. A clear, concise explanation of the code in markdown format.
+                    2. A flowchart representation of the code's logic in a structured JSON format.
+                    3. A list of actionable optimization suggestions in a structured JSON format.
+
+                    JSON Schema Details:
+                    - "flowchart": must have "nodes" (id, label, type) and "links" (source, target, label?).
+                    - "optimization_suggestions": must be an array of strings. Each string is a distinct suggestion.
+
+                    Here is the code: \`\`\`${language}\n${code}\n\`\`\`
+                `;
+
+                const schema = {
+                    type: "OBJECT",
+                    properties: {
+                        "explanation": { "type": "STRING" },
+                        "flowchart": {
+                            type: "OBJECT",
+                            properties: {
+                                "nodes": {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            "id": { "type": "STRING" },
+                                            "label": { "type": "STRING" },
+                                            "type": { "type": "STRING" }
+                                        },
+                                        required: ["id", "label", "type"]
+                                    }
+                                },
+                                "links": {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            "source": { "type": "STRING" },
+                                            "target": { "type": "STRING" },
+                                            "label": { "type": "STRING" }
+                                        },
+                                        required: ["source", "target"]
+                                    }
+                                }
+                            },
+                            required: ["nodes", "links"]
+                        },
+                        "optimization_suggestions": { "type": "ARRAY", "items": { "type": "STRING" } }
+                    },
+                    required: ["explanation", "flowchart", "optimization_suggestions"]
+                };
+
+                const responseJson = await callGemini(prompt, schema);
+                
+                explanationContent.innerHTML = marked.parse(responseJson.explanation);
+                renderOptimizations(responseJson.optimization_suggestions);
+                renderFlowchart(responseJson.flowchart);
+
+            } catch (error) {
+                console.error("Analysis failed:", error);
+                explanationContent.innerHTML = `<p style="color: #ef4444;">Error: ${error.message}</p>`;
+                optimizationContent.innerHTML = `<p style="color: #ef4444;">Could not generate suggestions.</p>`;
+                flowchartGroup.innerHTML = `<text x="50%" y="50%" fill="#ef4444" text-anchor="middle">Failed to generate flowchart.</text>`;
+            } finally {
+                setLoading(false);
+            }
+        }
+        
+        function copyToClipboard(text, button) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                const originalText = button.innerText;
+                button.innerText = 'Copied!';
+                setTimeout(() => { button.innerText = originalText; }, 2000);
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+            }
+            document.body.removeChild(textArea);
+        }
+
+        // --- Initialize App ---
+        document.addEventListener('DOMContentLoaded', () => {
+            setInitialState();
+            loadApiKey();
+            
+            // Handle Welcome Animation
+            setTimeout(() => {
+                welcomeOverlay.style.opacity = '0';
+                setTimeout(() => {
+                    welcomeOverlay.style.display = 'none';
+                    // Trigger main content animation
+                    animatedElements.forEach((el, index) => {
+                        setTimeout(() => {
+                            el.style.opacity = '1';
+                            el.style.transform = 'translateY(0)';
+                        }, index * 100);
+                    });
+                }, 800);
+            }, 3000); // Increased delay for the new, longer phrase
+        });
+        
+        // --- Full Function Definitions ---
+        function setInitialState() {
+            const initialLang = languageSelect.value;
+            codeEditor.value = sampleCode[initialLang];
+            updateHighlighting();
+            explanationContent.innerHTML = `<div class="welcome-placeholder"><svg class="w-16 h-16 mb-4 text-gray-300 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg><p>AI-powered explanation will appear here. Press 'Analyze Code' to begin.</p></div>`;
+            optimizationContent.innerHTML = `<div class="welcome-placeholder"><svg class="w-16 h-16 mb-4 text-gray-300 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.375 3.375 0 0014 18.442V21a1 1 0 11-2 0v-2.558a3.375 3.375 0 00-.435.547l-.548-.547z"/></svg><p>Code optimization suggestions will appear here.</p></div>`;
+            flowchartGroup.innerHTML = `<text x="50%" y="50%" fill="var(--text-secondary)" text-anchor="middle">Flowchart will be generated here.</text>`;
+        }
+        
+        function updateHighlighting() {
+            const lang = languageSelect.value;
+            highlightingContent.className = `language-${lang} w-full h-full`;
+            highlightingContent.innerHTML = codeEditor.value;
+            hljs.highlightElement(highlightingContent);
+        }
+
+        function renderOptimizations(suggestions) {
+            if (!suggestions || suggestions.length === 0) {
+                optimizationContent.innerHTML = '<p>No specific optimization suggestions found. The code looks solid!</p>';
+                return;
+            }
+            const list = document.createElement('ul');
+            list.className = 'space-y-3';
+            suggestions.forEach(suggestion => {
+                const item = document.createElement('li');
+                item.className = 'flex items-start gap-3';
+                item.innerHTML = `
+                    <svg class="w-5 h-5 mt-1 text-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.375 3.375 0 0014 18.442V21a1 1 0 11-2 0v-2.558a3.375 3.375 0 00-.435.547l-.548-.547z"/></svg>
+                    <span>${suggestion}</span>
+                `;
+                list.appendChild(item);
+            });
+            optimizationContent.innerHTML = '';
+            optimizationContent.appendChild(list);
+        }
+
+        async function callGemini(prompt, schema) {
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", responseSchema: schema } };
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) {
+                const errorBody = await response.json();
+                throw new Error(errorBody.error.message || "API call failed");
+            }
+            const result = await response.json();
+            const jsonText = result.candidates[0].content.parts[0].text;
+            return JSON.parse(jsonText);
+        }
+
+        function setLoading(isLoading) {
+            analyzeBtn.disabled = isLoading;
+            btnText.style.display = isLoading ? 'none' : 'block';
+            btnLoader.style.display = isLoading ? 'block' : 'none';
+        }
+
+        function renderFlowchart(data) {
+            flowchartGroup.innerHTML = '';
+            const g = new dagre.graphlib.Graph();
+            g.setGraph({ rankdir: 'TB', marginx: 20, marginy: 20 });
+            g.setDefaultEdgeLabel(() => ({}));
+            const nodeWidth = 180, nodeHeight = 70;
+            data.nodes.forEach(node => { g.setNode(node.id, { label: node.label, width: nodeWidth, height: nodeHeight, type: node.type }); });
+            data.links.forEach(link => { g.setEdge(link.source, link.target, { label: link.label }); });
+            dagre.layout(g);
+g.nodes().forEach(v => {
+    const node = g.node(v);
+    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    group.setAttribute("class", "flowchart-node");
+    const shape = node.type === 'decision' ? document.createElementNS("http://www.w3.org/2000/svg", "path") : document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    if (node.type === 'decision') {
+        shape.setAttribute("d", `M0 ${node.height/2} L${node.width/2} 0 L${node.width} ${node.height/2} L${node.width/2} ${node.height} Z`);
+    } else {
+        shape.setAttribute("width", node.width);
+        shape.setAttribute("height", node.height);
+        shape.setAttribute("rx", node.type === 'start' || node.type === 'end' ? node.height / 2 : 12);
+    }
+    group.appendChild(shape);
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", node.width / 2);
+    text.setAttribute("y", node.height / 2);
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("dy", ".3em");
+    const words = node.label.split(' ');
+    let line = '';
+    words.forEach(word => {
+        const testLine = line + word + ' ';
+        if (testLine.length > 20 && line.length > 0) {
+            const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+            tspan.setAttribute('x', node.width / 2);
+            tspan.setAttribute('dy', '1.2em');
+            tspan.textContent = line;
+            text.appendChild(tspan);
+            line = word + ' ';
+        } else {
+            line = testLine;
+        }
+    });
+    const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+    tspan.setAttribute('x', node.width / 2);
+    tspan.setAttribute('dy', text.childElementCount === 0 ? '.3em' : '1.2em');
+    tspan.textContent = line;
+    text.appendChild(tspan);
+    group.appendChild(text);
+    group.setAttribute("transform", `translate(${node.x - node.width/2}, ${node.y - node.height/2})`);
+    flowchartGroup.appendChild(group);
+});
+            g.edges().forEach(e => {
+                const edge = g.edge(e);
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                let d = "";
+                edge.points.forEach((p, i) => { d += (i === 0 ? 'M' : 'L') + p.x + ',' + p.y; });
+                path.setAttribute("d", d);
+                path.setAttribute("class", "flowchart-link");
+                flowchartGroup.appendChild(path);
+                if (edge.label) {
+                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    text.textContent = edge.label;
+                    text.setAttribute('x', edge.x);
+                    text.setAttribute('y', edge.y);
+                    text.setAttribute('text-anchor', 'middle');
+                    text.setAttribute('fill', 'var(--text-secondary)');
+                    flowchartGroup.appendChild(text);
+                }
+            });
+            setupPanAndZoom(flowchartSvg, flowchartGroup);
+        }
+
+        function setupPanAndZoom(svg, group) {
+            let pan = false; let point = { x: 0, y: 0 }; let viewbox = { x: 0, y: 0, w: svg.clientWidth, h: svg.clientHeight };
+            svg.setAttribute('viewBox', `${viewbox.x} ${viewbox.y} ${viewbox.w} ${viewbox.h}`);
+            const svgSize = group.getBBox();
+            if (svgSize.width > 0) { // Only set initial view if there's content
+                const initialScale = Math.min(viewbox.w / (svgSize.width + 100), viewbox.h / (svgSize.height + 100));
+                const initialX = (viewbox.w - svgSize.width * initialScale) / 2 - svgSize.x * initialScale;
+                const initialY = (viewbox.h - svgSize.height * initialScale) / 2 - svgSize.y * initialScale;
+                group.setAttribute('transform', `translate(${initialX}, ${initialY}) scale(${initialScale})`);
+            }
+            svg.addEventListener('mousedown', (e) => { e.preventDefault(); pan = true; point = { x: e.clientX, y: e.clientY }; svg.style.cursor = 'grabbing'; });
+            svg.addEventListener('mousemove', (e) => { if (!pan) return; e.preventDefault(); const dx = (e.clientX - point.x) * (viewbox.w / svg.clientWidth); const dy = (e.clientY - point.y) * (viewbox.h / svg.clientHeight); viewbox.x -= dx; viewbox.y -= dy; svg.setAttribute('viewBox', `${viewbox.x} ${viewbox.y} ${viewbox.w} ${viewbox.h}`); point = { x: e.clientX, y: e.clientY }; });
+            svg.addEventListener('mouseup', () => { pan = false; svg.style.cursor = 'grab'; });
+            svg.addEventListener('mouseleave', () => { pan = false; svg.style.cursor = 'grab'; });
+            svg.addEventListener('wheel', (e) => { e.preventDefault(); const w = viewbox.w; const h = viewbox.h; const mx = e.offsetX; const my = e.offsetY; const dw = w * Math.sign(e.deltaY) * 0.1; const dh = h * Math.sign(e.deltaY) * 0.1; const dx = dw * mx / svg.clientWidth; const dy = dh * my / svg.clientHeight; viewbox.x += dx; viewbox.y += dy; viewbox.w -= dw; viewbox.h -= dh; svg.setAttribute('viewBox', `${viewbox.x} ${viewbox.y} ${viewbox.w} ${viewbox.h}`); });
+        }
+    </script>
+</body>
+</html>
